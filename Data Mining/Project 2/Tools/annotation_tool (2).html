@@ -1,0 +1,480 @@
+<HTML>
+    <Head>
+        <Title>
+
+        </Title>
+        <script src="https://d3js.org/d3.v7.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    </Head>
+    <BODY>
+        <DIV id="mainApp">
+            <label>Choose a csv file:</label>
+            <input type="file" name="inputFile" accept=".csv" @change="loadData"/> 
+            <br/>
+            <select name="date" v-model="dateValue" @change="drawGraph">
+                <option value="">Choose date</option>
+                <option v-bind:value="date" v-for="date in dateList">{{date}}</option>
+            </select>
+            <label>graph width:</label>
+            <input type="text" v-model="graphWidthVal" @change="drawGraph"/>
+            <!--
+                <label><input type="checkbox" v-model="is30MinMode" checked/>30min mode: label works based on 30min unit.</label>
+            -->
+
+            <div id="graphs">
+                <label>You can select area by clicking the graph.</label>
+                <div v-for="key in graphIdList">
+                    <Label>
+                        {{graphIdNameList(key)}}
+                    </Label>
+                    <br/>
+                    <svg v-bind:id="key" v-bind:width="(graphWidthVal==''?0:graphWidthVal)+'px'" height="350px" xmlns="http://www.w3.org/2000/svg">
+                    </svg>
+                </div>
+            </div>
+
+            <br/>
+            <br/>
+            <div>
+                <div>
+                    <label>Click to set Label Name for selected area.</label>
+                    <br/>
+                    <button @click="saveWithLabelName(ln)"  v-for="ln in labelNameList">{{ln}}</button>
+                </div>
+            </div>
+            <br/>
+            <br/>
+            <br/>
+            <Label>
+                Data List
+            </Label>
+            <div v-for="(l, idx) in labelList">
+                <Label>Start: {{dateToStringFormat(l.start)}}</Label>
+                <Label>End: {{dateToStringFormat(l.end)}}</Label>
+                <Label>Label Name: {{l.labelName}}</Label>
+                <button @click="removeLabelWithIdx(idx)">Remove</button>
+            </div>
+            <br/>
+            <br/>
+            <button @click="exportResult">Export</button>
+        </DIV>
+    </BODY>
+
+
+    <script>
+        var app = new Vue({
+            el: '#mainApp',
+            data: {
+                fullFileData: [{}],
+                dateList: [],
+                dateValue: "",
+                labelList: [],
+                graphWidthVal: 1800,
+                is30MinMode: true,
+                labelNameList: ["Sleep", "Wake up", "Eat", "Drink", "Cook", "Clean", "Go to bathroom", 
+                                    "Take shower", "Wash dishes", "Take medicine", "Go walk", "Work out", "Watch TV", "None"],
+                graphIdList: ['step', 'tag_data'],
+                choosedLabelData: {
+                    start:"",
+                    end:"",
+                    labelName:""
+                }
+            },
+            methods: {
+                /*
+                removeTop2: function(o){
+                    return o.filter(x => x != "client_time" && x != "");
+                },
+                stringMapping: function(k){
+                    let mappingObj = {
+                        tag_0: "Null", 
+                        tag_1: "refrigerator", 
+                        tag_2: "toilet", 
+                        tag_3: "bathroom", 
+                        tag_4: "front door", 
+                        tag_5: "bedroom", 
+                        tag_6: "medicine", 
+                        tag_7: "water purifier", 
+                        tag_8: "remote controller", 
+                        tag_9: "kitchen", 
+                        tag_10: "microwave", 
+                        tag_11: "window", 
+                        tag_12: "sink"
+                    }
+                    if(k in mappingObj){
+                        return k+": "+mappingObj[k];
+                    }
+                    return k;
+                },
+                */
+                graphIdNameList: function(id){
+                    let mappingObj = {
+                        step: "step", 
+                        tag_data: "tag data"
+                    }
+                    return mappingObj[id];
+                },
+                dateToStringFormat: function(date){
+                    return date.getFullYear()+"-"+("0" + (1 + date.getMonth())).slice(-2)+"-"+("0" + date.getDate()).slice(-2)+" "+date.toTimeString().split(' ')[0]
+                },
+                loadData: function(e) {
+                    this.labelList = [];
+                    d3.select(`#step`).selectAll("*").remove();
+                    d3.select(`#tag_data`).selectAll("*").remove();
+                    this.fullFileData = [{}];
+                    this.dateValue = "";
+                    this.dateList = [];
+                    this.choosedLabelData = {
+                        start:"",
+                        end:"",
+                        labelName:""
+                    };
+                    var inputFile = e.target.files[0];
+                    var fileReader = new FileReader();
+                    fileReader.readAsText(inputFile);
+                    a = this;
+                    fileReader.onload = function(i){
+                        var parsedData = d3.csvParse(i.target.result);
+                        a.fullFileData = parsedData;
+                        function onlyUnique(value, index, self) {
+                            return self.indexOf(value) === index;
+                        }
+                        a.dateList = a.fullFileData.map(x => x.client_time.substring(0, 10)).filter(onlyUnique).sort()
+                    }
+                },
+                drawGraph: function(){
+                    this.choosedLabelData = {
+                        start:"",
+                        end:"",
+                        labelName:""
+                    };
+
+
+                    sampledData = this.fullFileData.filter(x => x.client_time.substring(0, 10) == this.dateValue).sort(x => x.client_time);
+
+                    let positionCalcFunc = (time, x = 20, y = this.graphWidthVal - 20) => {
+                        return x + (y - x)*(time.getTime() - new Date(`${this.dateValue}T00:00:00`)) / (24*60*60*1000)
+                    }
+                    let timeCalcFunc = (position, x = 20, y = this.graphWidthVal - 20) => {
+                        return new Date(new Date(`${this.dateValue}T00:00:00`).getTime() + ((position-x)/(y-x))*(new Date(`${this.dateValue}T23:59:59`).getTime() - new Date(`${this.dateValue}T00:00:00`).getTime()));
+                    }
+
+                    const xScale = d3.scaleTime()
+                        .domain([new Date(`${this.dateValue}T00:00:00`), new Date(`${this.dateValue}T23:59:59`)])
+                        .range([20, this.graphWidthVal - 20]); 
+
+                    const tagyScale = d3.scaleLinear()
+                        .domain([12, 0])
+                        .range([20, 330]);
+
+                    for(let i=0; i<this.graphIdList.length; i++){
+                        d3.select(`#${this.graphIdList[i]}`).selectAll("*").remove();
+                    }
+
+                    let tagDataArr = [];
+
+                    //Object.keys(sampledData[0]).forEach(k => 
+                    for(let i=0; i < Object.keys(sampledData[0]).length; i++){
+                        k = Object.keys(sampledData[0])[i];
+                        if (k == "client_time" || k == ""){
+                            continue;
+                        }
+                        if (k == "battery_low" || k == "is_charge" || k == "tag_battery_low"){
+                            continue;
+                        }
+                        let targetGraph = k == "step" ? "step" : "tag_data";
+                        let tagNum = -1;
+                        if(k.startsWith("tag_")){
+                            tagNum = Number(k.slice(4));
+                        }
+                        sampleDataWithKey = sampledData.map(x => {
+                            return {"time": new Date(x.client_time), "value": Number(x[k])}})
+                        
+
+                        if(k == "step"|| k == "tag_0"){
+                            let min = Math.min(...sampleDataWithKey.map(x => x.value));
+                            let max = Math.max(...sampleDataWithKey.map(x => x.value));
+                            min = min>0?0:min;
+                            max = max<0?0:max;
+                            if(k == "tag_0"){
+                                min = 0;
+                                max = 12;
+                            }
+
+                            const yScale = d3.scaleLinear()
+                                .domain([max, min])
+                                .range([20, 330]);
+
+                            const xAxisSVG = d3.select(`#${targetGraph}`).append("g").attr("transform", "translate(0, 330)");
+                            const yAxisSVG = d3.select(`#${targetGraph}`).append("g");
+                                
+                            const xAxis = d3.axisBottom(xScale).tickSize(10).ticks(10);
+                            const yAxis = d3.axisRight(yScale).tickSize(10).ticks(10);
+                            xAxis(xAxisSVG);
+                            yAxis(yAxisSVG);
+
+                            let stringDate = new Date(`${this.dateValue}T00:00:00`);
+                            let isFirst = true;
+                            while(stringDate < new Date(`${this.dateValue}T23:59:59`)){
+                                if(isFirst){
+                                    isFirst = !isFirst;
+                                    stringDate = new Date(stringDate.getTime() + 30*60000);
+                                    continue;
+                                }
+                                xposval = positionCalcFunc(stringDate);
+                                d3.select(`#${targetGraph}`).append("svg:line")
+                                    .attr("x1", xposval)
+                                    .attr("y1", 20)
+                                    .attr("x2", xposval)
+                                    .attr("y2", 330)
+                                    .attr("stroke", "#DDDDDD");
+                                stringDate = new Date(stringDate.getTime() + 30*60000);
+                            }
+
+
+                            const linearGenerator = d3.line()
+                                .x(d=>xScale(d.time))
+                                .y(d=>yScale(d.value))
+                            if(k == "step"){
+                                d3.select(`#${targetGraph}`).selectAll("circle")
+                                    .data(sampleDataWithKey)
+                                    .enter()
+                                    .append("circle")
+                                    .attr("r", 5)
+                                    .attr("cx", d=>xScale(d.time))
+                                    .attr("cy", d=>yScale(d.value))
+                                    .style("fill", "black")
+                                d3.select(`#${targetGraph}`)
+                                    .append("path")
+                                    .attr("d", linearGenerator(sampleDataWithKey))
+                                    .attr("fill", "none")
+                                    .attr("stroke-width", 2)
+                                    .attr("stroke", "black")
+                            }
+                            if(k=="tag_0"){
+                                for(let j = 0; j <= 12; j++){
+                                    d3.select(`#${targetGraph}`).append("svg:line")
+                                        .attr("x1", 20)
+                                        .attr("y1", tagyScale(j))
+                                        .attr("x2", this.graphWidthVal - 20)
+                                        .attr("y2", tagyScale(j))
+                                        .attr("stroke", "#DDDDDD");
+                                }
+                            }
+                        }
+                        if(targetGraph == "tag_data"){
+                            let sampleDataWithKeyFilteredTag = sampleDataWithKey.filter(x => x.value != 0).map(x => {return {time:x.time, value:tagNum}});
+                            tagDataArr = tagDataArr.concat(sampleDataWithKeyFilteredTag);
+                        }
+                    };
+
+                    d3.select(`#tag_data`).selectAll("circle")
+                                .data(tagDataArr)
+                                .enter()
+                                .append("circle")
+                                .attr("r", 5)
+                                .attr("cx", d=>xScale(d.time))
+                                .attr("cy", d=>tagyScale(d.value))
+                                .style("fill", "black")
+
+
+                    var divScrean = d3.select('#graphs').selectAll("svg");
+                    var stepScrean = d3.select('#step');
+
+                    let tooltip = stepScrean.append("text")
+                        .attr("x", "20")
+                        .attr("y", "35")
+                        .style("display", "none");
+
+                    this.labelList.filter(x => this.dateToStringFormat(x.start).substring(0, 10) == this.dateValue).forEach(x => {
+                        divScrean.append("rect")
+                            .attr("x", positionCalcFunc(x.start))
+                            .attr("width", positionCalcFunc(x.end) - positionCalcFunc(x.start))
+                            .attr("y", 10)
+                            .attr("height", 330)
+                            .attr("fill", "blue")
+                            .attr("fill-opacity", "0.1")
+                            .attr("stroke", "red")
+                            .attr("stroke-opacity", "0.9")
+                            .on("mouseover",function(d){
+                                if(d.path[1] == stepScrean._groups[0][0]){
+                                    tooltip.style("display", null);
+                            }})
+                            .on("mouseout",function(){tooltip.style("display", "none");})
+                            .on("mousemove", function(d) {
+                                    tooltip.attr("x", d.layerX+'px');
+                                    tooltip.attr("y", d.layerY+'px');
+                                    tooltip.text(`label Name: ${x.labelName}`); 
+                            });
+                    })
+
+                    /*
+                    const handleDrag = (d) => {
+                        divScrean.selectAll(".tempRec").remove();
+                        let positionleft = Math.min(d.subject.x, d.x);
+                        let positionright = Math.max(d.subject.x, d.x);
+                        positionleft = positionleft<20?20:positionleft;
+                        positionright = positionright>this.graphWidthVal - 20?this.graphWidthVal - 20:positionright;
+                        
+                        if(this.is30MinMode){
+                            positionleft = positionCalcFunc(new Date(Math.floor(timeCalcFunc(positionleft).getTime() / (30*60*1000)) * 30*60*1000));
+                            positionright = positionCalcFunc(new Date(Math.ceil(timeCalcFunc(positionright).getTime() / (30*60*1000)) * 30*60*1000));
+                        }
+                        divScrean.append("rect")
+                            .attr("x", positionleft)
+                            .attr("width", positionright - positionleft)
+                            .attr("y", 10)
+                            .attr("height", 330)
+                            .attr("fill", "blue")
+                            .attr("fill-opacity", "0.1")
+                            .attr("stroke", "red")
+                            .attr("stroke-opacity", "0.9")
+                            .attr("class", "tempRec")
+                    };
+                    const handleDragEnd = (d) => {
+                        let positionleft = Math.min(d.subject.x, d.x);
+                        let positionright = Math.max(d.subject.x, d.x);
+                        positionleft = positionleft<20?20:positionleft;
+                        positionright = positionright>this.graphWidthVal - 20?this.graphWidthVal - 20:positionright;
+                        
+                        let timeLeft = timeCalcFunc(positionleft);
+                        let timeRight = timeCalcFunc(positionright);
+                        if(this.is30MinMode){
+                            timeLeft = new Date(Math.floor(timeCalcFunc(positionleft).getTime() / (30*60*1000)) * 30*60*1000);
+                            timeRight = new Date(Math.ceil(timeCalcFunc(positionright).getTime() / (30*60*1000)) * 30*60*1000);
+                        }
+                        
+                        let loopVal = true;
+                        while(loopVal){
+                            let labelName = prompt(`From ${timeLeft.toTimeString().split(' ')[0]} to ${timeRight.toTimeString().split(' ')[0]}, name this label. Available label list: Sleep, Wake up, Eat, Drink, Cook, Clean, Go to bathroom, Take shower, Wash dishes, Take medicine, Go walk, Work out, Watch TV.`, "");
+                            if(labelName != null){
+                                if(this.labelNameList.includes(labelName)){
+                                    this.labelList.push({
+                                        'start':timeLeft,
+                                        'end':timeRight,
+                                        'labelName':labelName
+                                    })
+                                    this.labelList.sort((x, y) => {return x.start - y.start});
+                                    this.drawGraph();
+                                    loopVal = false;
+                                }
+                                else{
+                                    alert("Unavailable label name!");
+                                }
+                            }
+                            else{
+                                loopVal = false;
+                            }
+                        }
+                        divScrean.selectAll(".tempRec").remove();
+                    }
+                    divScrean.call(d3.drag().on("drag", handleDrag).on("end", handleDragEnd))
+                    */
+                    const handleClick = (d) => {
+                        let positionleft = Math.min(d.layerX);
+                        let positionright = Math.max(d.layerX);
+                        positionleft = positionleft<20?20:positionleft;
+                        positionright = positionright>this.graphWidthVal - 20?this.graphWidthVal - 20:positionright;
+                        
+                        let timeLeft = timeCalcFunc(positionleft);
+                        let timeRight = timeCalcFunc(positionright);
+                        if(this.is30MinMode){
+                            timeLeft = new Date(Math.floor(timeCalcFunc(positionleft).getTime() / (30*60*1000)) * 30*60*1000);
+                            timeRight = new Date(Math.ceil(timeCalcFunc(positionright).getTime() / (30*60*1000)) * 30*60*1000);
+                            positionleft = positionCalcFunc(timeLeft);
+                            positionright = positionCalcFunc(timeRight);
+                        }
+                        
+                        divScrean.selectAll(".tempRec").remove();
+                        divScrean.append("rect")
+                            .attr("x", positionleft)
+                            .attr("width", positionright - positionleft)
+                            .attr("y", 10)
+                            .attr("height", 330)
+                            .attr("fill", "red")
+                            .attr("fill-opacity", "0.1")
+                            .attr("stroke", "red")
+                            .attr("stroke-opacity", "0.9")
+                            .attr("class", "tempRec")
+                        this.choosedLabelData = {
+                                    start:timeLeft,
+                                    end:timeRight,
+                                    labelName:""
+                                }
+                    }
+                    divScrean.on('click', handleClick);
+                },
+                saveWithLabelName: function(ln){
+                    if(this.choosedLabelData.start == ""){
+                        alert("Please select area before setting label name. You can select area by clicking the graph.");
+                        return;
+                    }
+                    this.choosedLabelData.labelName = ln;
+                    this.labelList.push(this.choosedLabelData);
+                    this.labelList.sort((x, y) => {return x.start - y.start});
+                    this.drawGraph();
+                    this.choosedLabelData = {
+                        start:"",
+                        end:"",
+                        labelName:""
+                    }
+                },
+                removeLabelWithIdx: function(idx){
+                    this.labelList.splice(idx, 1);
+                    this.drawGraph();
+                },
+                exportResult: function(){
+                    let csv = "";
+
+                    //let items = this.fullFileData.map(x=>{x.label=""; return x;});
+
+                    let items = this.labelList.map(x=> {return {
+                        start: this.dateToStringFormat(x.start),
+                        end: this.dateToStringFormat(x.end),
+                        labelName: x.labelName
+                    }})
+                    /*
+                    for(let idx = 0; idx < this.labelList.length; idx++){
+                        items = items.map(x => {
+                            if(new Date(x.client_time) > this.labelList[idx].start && new Date(x.client_time) < this.labelList[idx].end){
+                                x.label = this.labelList[idx].labelName;
+                            }
+                            return x;
+                        })
+                    }
+                    */
+
+                    for(let row = 0; row < items.length; row++){
+                        let keysAmount = Object.keys(items[row]).length
+                        let keysCounter = 0
+
+                        if(row === 0){
+
+                            for(let key in items[row]){
+
+                                csv += key + (keysCounter+1 < keysAmount ? ',' : '\r\n' )
+                                keysCounter++
+                            }
+                            keysCounter = 0
+                        }
+
+                        for(let key in items[row]){
+                            csv += items[row][key] + (keysCounter+1 < keysAmount ? ',' : '\r\n' )
+                            keysCounter++
+                        }
+
+                        keysCounter = 0
+                    }
+
+                    let link = document.createElement('a')
+                    link.id = 'download-csv'
+                    link.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(csv));
+                    link.setAttribute('download', 'result.csv');
+                    document.body.appendChild(link)
+                    document.querySelector('#download-csv').click()
+                    link.remove()
+                }
+            }
+        })
+    </script>
+</HTML>
